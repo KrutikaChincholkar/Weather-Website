@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Weather App</title>
+    <!-- Favicon: Cloud icon for the tab bar, as requested -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☁️</text></svg>">
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        body { font-family: 'Inter', sans-serif; transition: background-color 0.5s ease; }
+        /* Adjusted the default card style to a light, relaxing gradient */
+        .card { transition: all 0.5s ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
+
+    <!-- Theme Toggle Button (positioned absolutely for fixed location) -->
+    <button id="theme-toggle" class="absolute top-4 right-4 p-3 rounded-full bg-gray-200 text-gray-800 shadow-md hover:bg-gray-300 transition duration-300">
+        <!-- Sun/Moon Icon Placeholder -->
+        <svg id="theme-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <!-- Icon path will be set dynamically by JavaScript -->
+        </svg>
+    </button>
+
+    <!-- Weather Card Container - Initial state will be set by JS theme application -->
+    <div id="weather-card" class="card w-full max-w-lg mx-auto p-8 rounded-3xl shadow-2xl text-gray-800 backdrop-blur-sm bg-gradient-to-br from-white to-blue-100">
+
+        <h1 id="app-title" class="text-3xl font-bold mb-6 text-center">Dynamic Sky Weather</h1>
+
+        <!-- Location Input -->
+        <div class="flex space-x-3 mb-6">
+            <input type="text" id="location-input" placeholder="Enter city"
+                   class="flex-grow p-3 rounded-xl border border-gray-400 bg-white/50 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg transition duration-300">
+            <button id="search-button"
+                    class="bg-green-500 text-white hover:bg-green-600 font-semibold p-3 rounded-xl shadow-lg transition duration-300 transform hover:scale-[1.02] active:scale-95">
+                Search
+            </button>
+        </div>
+
+        <!-- Message/Loading Display -->
+        <div id="message-area" class="text-center text-sm mb-4 h-6 text-indigo-700"></div>
+
+        <!-- Main Weather Display (Starts visible with default data) -->
+        <div id="weather-display">
+            <!-- Location and Date -->
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 id="city-name" class="text-4xl font-extrabold">---</h2>
+                    <p id="local-time" class="text-gray-600 text-sm mt-1">Awaiting City Input</p>
+                </div>
+                <div class="text-right">
+                    <p id="user-id-label" class="text-sm text-gray-600">User ID:</p>
+                    <p id="user-id-display" class="text-xs font-mono bg-white/50 p-1 rounded text-gray-700">Loading...</p>
+                </div>
+            </div>
+
+            <div class="flex flex-col items-center">
+                <!-- Icon and Temperature -->
+                <div id="weather-icon" class="text-8xl mb-4 animate-pulse">⛅</div>
+                <p id="temperature" class="text-7xl font-light mb-2">--&deg;C</p>
+                <p id="condition" class="text-2xl font-medium uppercase tracking-wider">ENTER CITY</p>
+            </div>
+
+            <!-- Detailed Metrics Grid -->
+            <div class="grid grid-cols-2 gap-4 mt-8 bg-white/50 p-4 rounded-xl">
+                <div class="flex justify-between items-center bg-white/80 p-3 rounded-lg">
+                    <span class="text-gray-600">Wind:</span>
+                    <span id="wind-speed" class="font-bold">-- km/h</span>
+                </div>
+                <div class="flex justify-between items-center bg-white/80 p-3 rounded-lg">
+                    <span class="text-gray-600">Humidity:</span>
+                    <span id="humidity" class="font-bold">--%</span>
+                </div>
+                <div class="flex justify-between items-center bg-white/80 p-3 rounded-lg">
+                    <span class="text-gray-600">Feels Like:</span>
+                    <span id="feels-like" class="font-bold">--&deg;C</span>
+                </div>
+                <div class="flex justify-between items-center bg-white/80 p-3 rounded-lg">
+                    <span class="text-gray-600">UV Index:</span>
+                    <span id="uv-index" class="font-bold">--</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase and App Configuration (MANDATORY BOILERPLATE)
+        setLogLevel('Debug');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'weather-app-default';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let auth, db, userId;
+
+        /**
+         * Initializes Firebase and authenticates the user.
+         */
+        async function initializeFirebase() {
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        // Attempt to sign in
+                        if (initialAuthToken) {
+                            try {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                                userId = auth.currentUser.uid;
+                            } catch (error) {
+                                console.error("Error signing in with custom token:", error);
+                                await signInAnonymously(auth);
+                                userId = auth.currentUser.uid;
+                            }
+                        } else {
+                            // If no token, sign in anonymously
+                            await signInAnonymously(auth);
+                            userId = auth.currentUser.uid;
+                        }
+                    }
+                    // Display user ID once available
+                    document.getElementById('user-id-display').textContent = userId;
+                });
+            } else {
+                console.warn("Firebase config not found. Running without authentication.");
+                userId = 'anonymous-web-user';
+                document.getElementById('user-id-display').textContent = userId;
+            }
+        }
+
+        initializeFirebase();
+
+        // --- Weather App Specific Logic ---
+
+        // API Key and Base URL (using the key provided by the user)
+        const API_KEY = '32a65a7aa85b4be78ef165633250310';
+        const BASE_URL = 'https://api.weatherapi.com/v1/current.json';
+
+        const body = document.body;
+        const appTitle = document.getElementById('app-title');
+        const locationInput = document.getElementById('location-input');
+        const searchButton = document.getElementById('search-button');
+        const messageArea = document.getElementById('message-area');
+        const weatherCard = document.getElementById('weather-card');
+        const weatherDisplay = document.getElementById('weather-display');
+        const weatherIcon = document.getElementById('weather-icon');
+        const cityName = document.getElementById('city-name');
+        const localTime = document.getElementById('local-time');
+        const temperature = document.getElementById('temperature');
+        const conditionText = document.getElementById('condition');
+        const windSpeed = document.getElementById('wind-speed');
+        const humidity = document.getElementById('humidity');
+        const feelsLike = document.getElementById('feels-like');
+        const uvIndex = document.getElementById('uv-index');
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+        const userIdLabel = document.getElementById('user-id-label');
+        
+        // --- Theme Management ---
+        let currentTheme = localStorage.getItem('theme') || 'light'; 
+
+        const themeConfigs = {
+            light: {
+                // User requested light theme: blue 300 to blue 500
+                bodyBg: 'bg-blue-100', // Light blue background for page
+                defaultCardBg: 'from-blue-300 to-blue-500', 
+                textColor: 'text-white', // Use white text against this darker light theme card
+                buttonBg: 'bg-green-500',
+                messageText: 'text-indigo-800', // Changed to dark indigo for visibility
+                toggleIcon: `<path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0115 18.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0015 2.25c.89 0 1.742.193 2.525.545A.75.75 0 0018 3.5v.75a.75.75 0 01-.75.75H16.5a.75.75 0 00-.75.75v.75a.75.75 0 01-.75.75H13.5a.75.75 0 00-.75.75v.75a.75.75 0 01-.75.75H10.5a.75.75 0 00-.75.75v.75a.75.75 0 01-.75.75H7.5a.75.75 0 00-.75.75v.75a.75.75 0 01-.75.75H4.5a.75.75 0 00-.75.75v.75a.75.75 0 01-.75.75H2.25a.75.75 0 00-.75.75V15a9.752 9.752 0 0020.252-4.248.75.75 0 00-.008-.008H21.75V15.002z" />` // Moon icon
+            },
+            dark: {
+                // User requested dark theme: dark gray to darker gray
+                bodyBg: 'bg-gray-900', // Darker body background for page
+                defaultCardBg: 'from-gray-700 to-gray-900', 
+                textColor: 'text-white', 
+                buttonBg: 'bg-indigo-500',
+                messageText: 'text-gray-400',
+                toggleIcon: `<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.75l-1.558 1.558M21 12h-2.25m-.75 6.364l-1.558-1.558M12 18.75V21m-4.606-2.094l-1.558 1.558M3.75 12H6m-.75-6.364l1.558 1.558M12 12.75a.75.75 0 100-1.5.75.75 0 000 1.5z" />` // Sun icon
+            }
+        };
+
+        function applyBaseTheme(themeKey) {
+            const config = themeConfigs[themeKey];
+            
+            // 1. Update Body Background
+            body.className = `min-h-screen flex items-center justify-center p-4 ${config.bodyBg}`;
+            
+            // 2. Update Card Default/Initial appearance
+            // This is only the *default* theme. It will be overridden by weather data if a search is performed.
+            weatherCard.className = `card w-full max-w-lg mx-auto p-8 rounded-3xl shadow-2xl backdrop-blur-sm ${config.textColor} bg-gradient-to-br ${config.defaultCardBg}`;
+            
+            // 3. Update Search Button Style
+            searchButton.className = `font-semibold p-3 rounded-xl shadow-lg transition duration-300 transform hover:scale-[1.02] active:scale-95 ${config.buttonBg} text-white hover:${config.buttonBg.replace(/-\d+/, '-600')}`;
+            
+            // 4. Update Toggle Button Icon
+            themeIcon.innerHTML = config.toggleIcon;
+            
+            // Update toggle button background to contrast with body
+            themeToggle.className = `absolute top-4 right-4 p-3 rounded-full shadow-md transition duration-300 ${themeKey === 'light' ? 'bg-gray-100 text-gray-800 hover:bg-gray-200' : 'bg-gray-700 text-white hover:bg-gray-600'}`;
+            
+            // Store and update global state
+            localStorage.setItem('theme', themeKey);
+            currentTheme = themeKey;
+        }
+
+        function toggleTheme() {
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            applyBaseTheme(newTheme);
+            
+            // Check if weather data is currently displayed (i.e., not the initial state placeholder)
+            if (cityName.textContent !== '---' && locationInput.value.trim() !== '') {
+                // If a city is already displayed, re-fetch the weather to ensure the dynamic colors are reapplied correctly over the new base theme
+                fetchWeather(cityName.textContent); 
+            } else {
+                // If in placeholder state, ensure the placeholder text colors match the new theme
+                updatePlaceholderText(themeConfigs[newTheme].textColor);
+            }
+        }
+        
+        function updatePlaceholderText(textColorClass) {
+            // Apply text color to elements that are not dynamically updated
+            appTitle.className = `text-3xl font-bold mb-6 text-center ${textColorClass}`;
+            cityName.className = `${textColorClass} text-4xl font-extrabold`;
+            temperature.className = `${textColorClass} text-7xl font-light mb-2`;
+            conditionText.className = `${textColorClass} text-2xl font-medium uppercase tracking-wider`;
+            
+            // Reapply static placeholder content
+            cityName.textContent = '---';
+            localTime.textContent = 'Awaiting City Input';
+            weatherIcon.textContent = '⛅'; // Updated icon to sun behind cloud
+            temperature.textContent = '--\u00b0C';
+            conditionText.textContent = 'ENTER CITY';
+            windSpeed.textContent = '-- km/h';
+            humidity.textContent = '--%';
+            feelsLike.textContent = '--\u00b0C';
+            uvIndex.textContent = '--';
+            
+            // Apply secondary text color to labels
+            const detailTextColor = textColorClass.includes('gray-800') ? 'text-gray-600' : 'text-white/80';
+            localTime.className = `${detailTextColor} text-sm mt-1`;
+            userIdLabel.className = `text-sm ${detailTextColor}`;
+
+
+            // Update the message area for the new theme
+            displayMessage("Enter a city and click Search to get the weather.", themeConfigs[currentTheme].messageText);
+        }
+
+        themeToggle.addEventListener('click', toggleTheme);
+
+        // --- Core Weather Functions ---
+
+        /**
+         * Maps a weather condition string to corresponding styles and an icon, considering the current theme.
+         * @param {string} condition - The weather condition string.
+         * @returns {{bgClass: string, icon: string, textClass: string}}
+         */
+        function mapConditionToStyle(condition) {
+            const lowerCaseCond = condition.toLowerCase();
+            const isDark = currentTheme === 'dark';
+
+            let style = {
+                bgClass: isDark ? 'from-gray-600 to-gray-800' : 'from-blue-100 to-sky-200', // Default sky color
+                icon: '☁️',
+                textClass: isDark ? 'text-white' : 'text-gray-800' // Dark text for light, white text for dark
+            };
+
+            if (lowerCaseCond.includes('clear') || lowerCaseCond.includes('sunny')) {
+                style.bgClass = isDark ? 'from-amber-600 to-yellow-800' : 'from-yellow-50 to-amber-100';
+                style.icon = '☀️';
+            } else if (lowerCaseCond.includes('cloudy') || lowerCaseCond.includes('overcast')) {
+                style.bgClass = isDark ? 'from-gray-500 to-gray-700' : 'from-gray-100 to-gray-200';
+                style.icon = '☁️';
+            } else if (lowerCaseCond.includes('rain') || lowerCaseCond.includes('drizzle') || lowerCaseCond.includes('showers')) {
+                style.bgClass = isDark ? 'from-blue-600 to-blue-800' : 'from-blue-100 to-sky-200';
+                style.icon = '🌧️';
+            } else if (lowerCaseCond.includes('snow') || lowerCaseCond.includes('sleet') || lowerCaseCond.includes('ice')) {
+                style.bgClass = isDark ? 'from-slate-600 to-slate-800' : 'from-white to-white';
+                style.icon = '❄️';
+                style.textClass = isDark ? 'text-white' : 'text-gray-800'; // Enforce black text on white snow background
+            } else if (lowerCaseCond.includes('mist') || lowerCaseCond.includes('fog')) {
+                style.bgClass = isDark ? 'from-slate-700 to-slate-900' : 'from-slate-100 to-slate-200';
+                style.icon = '🌫️';
+            } else if (lowerCaseCond.includes('thunder') || lowerCaseCond.includes('storm')) {
+                // Storm condition always uses a dark, dramatic theme for visual impact
+                style.bgClass = 'from-gray-700 to-slate-900';
+                style.icon = '⛈️';
+                style.textClass = 'text-white'; 
+            }
+
+            return style;
+        }
+
+        /**
+         * Fetches weather data for a given location and updates the UI.
+         * @param {string} location - The city or zip code to search for.
+         */
+        async function fetchWeather(location) {
+            if (!location) {
+                displayMessage("Please enter a location.", 'text-red-600');
+                return;
+            }
+
+            displayMessage("Fetching weather data...", currentTheme === 'light' ? 'text-green-700' : 'text-green-400');
+            
+            const url = `${BASE_URL}?key=${API_KEY}&q=${encodeURIComponent(location)}&aqi=no`; 
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error.message || 'Location not found.');
+                }
+
+                updateUI(data);
+                displayMessage(""); // Clear message
+            } catch (error) {
+                console.error("Weather Fetch Error:", error);
+                updateUIForError(location, error.message);
+                displayMessage(`Error: ${error.message}`, 'text-red-400');
+            }
+        }
+
+        /**
+         * Updates the DOM elements with the fetched weather data and applies styles.
+         * @param {object} data - The weather API response data.
+         */
+        function updateUI(data) {
+            const { current, location } = data;
+            const condition = current.condition.text;
+            const { bgClass, icon, textClass } = mapConditionToStyle(condition);
+
+            // 1. Update Card Style for "Live Change"
+            weatherCard.className = `card w-full max-w-lg mx-auto p-8 rounded-3xl shadow-2xl backdrop-blur-sm ${textClass} bg-gradient-to-br ${bgClass}`;
+
+            // Determine secondary colors based on primary text color
+            const isDarkText = textClass.includes('gray-800');
+            const detailTextColor = isDarkText ? 'text-gray-600' : 'text-white/80';
+            const detailBg = isDarkText ? 'bg-white/80' : 'bg-black/20'; 
+
+            // 2. Apply primary color (textClass) to main elements
+            appTitle.className = `text-3xl font-bold mb-6 text-center ${textClass}`;
+            cityName.className = `${textClass} text-4xl font-extrabold`;
+            weatherIcon.textContent = icon;
+            weatherIcon.className = `${textClass} text-8xl mb-4`;
+            temperature.className = `${textClass} text-7xl font-light mb-2`; 
+            conditionText.className = `${textClass} text-2xl font-medium uppercase tracking-wider`;
+
+            // 3. Apply secondary color (detailTextColor) to labels
+            localTime.className = `${detailTextColor} text-sm mt-1`;
+            userIdLabel.className = `text-sm ${detailTextColor}`;
+            
+            // Apply consistent background/text color to the User ID box
+            const userIdDisplay = document.getElementById('user-id-display');
+            userIdDisplay.className = `text-xs font-mono ${detailBg} p-1 rounded ${isDarkText ? 'text-gray-700' : 'text-white'}`;
+            
+            // Apply consistent background/text colors to detailed metrics container
+            const detailContainer = document.querySelector('.grid.grid-cols-2.gap-4');
+            detailContainer.className = `grid grid-cols-2 gap-4 mt-8 ${detailBg.replace('/20', '/40')} p-4 rounded-xl`; 
+
+            // Apply colors to grid items
+            document.querySelectorAll('.grid > div').forEach(div => {
+                div.className = `flex justify-between items-center ${detailBg} p-3 rounded-lg`;
+            });
+            document.querySelectorAll('.grid span:first-child').forEach(span => {
+                span.className = detailTextColor; // Labels
+            });
+            document.querySelectorAll('.grid span:last-child').forEach(span => {
+                span.className = `font-bold ${textClass}`; // Values (primary color for high contrast)
+            });
+
+            // 4. Set Content
+            cityName.textContent = location.name;
+            temperature.textContent = `${Math.round(current.temp_c)}\u00b0C`; 
+            conditionText.textContent = condition.toUpperCase();
+            localTime.textContent = `Local Time: ${new Date(location.localtime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} | ${location.country}`;
+
+            // Update Detailed Metrics
+            windSpeed.textContent = `${current.wind_kph} km/h`;
+            humidity.textContent = `${current.humidity}%`;
+            feelsLike.textContent = `${Math.round(current.feelslike_c)}\u00b0C`;
+            uvIndex.textContent = current.uv;
+            weatherDisplay.classList.remove('hidden');
+        }
+
+        /**
+         * Updates the UI when an error occurs.
+         */
+        function updateUIForError(location, errorMessage) {
+            // Use a consistent error state (dark red theme with white text)
+            weatherCard.className = 'card w-full max-w-lg mx-auto p-8 rounded-3xl shadow-2xl backdrop-blur-sm text-white bg-gradient-to-br from-red-600 to-red-800';
+
+            // Resetting inner elements for error visibility (forcing white text for dark error card)
+            const detailTextColor = 'text-white/80';
+            const detailBg = 'bg-black/20';
+
+            appTitle.className = `text-3xl font-bold mb-6 text-center text-white`;
+            localTime.className = `${detailTextColor} text-sm mt-1`;
+            userIdLabel.className = `text-sm ${detailTextColor}`;
+            document.getElementById('user-id-display').className = `text-xs font-mono ${detailBg} p-1 rounded text-white`;
+            document.querySelector('.grid.grid-cols-2.gap-4').className = `grid grid-cols-2 gap-4 mt-8 ${detailBg.replace('/20', '/40')} p-4 rounded-xl`;
+            document.querySelectorAll('.grid > div').forEach(div => {
+                div.className = `flex justify-between items-center bg-white/10 p-3 rounded-lg`;
+            });
+            document.querySelectorAll('.grid span:first-child').forEach(span => {
+                span.className = detailTextColor;
+            });
+            document.querySelectorAll('.grid span:last-child').forEach(span => {
+                span.className = 'font-bold text-white';
+            });
+            cityName.className = `text-white text-4xl font-extrabold`;
+            temperature.className = `text-white text-7xl font-light mb-2`; 
+            conditionText.className = `text-white text-2xl font-medium uppercase tracking-wider`;
+            weatherIcon.className = `text-white text-8xl mb-4`;
+
+
+            cityName.textContent = 'Error';
+            localTime.textContent = `Could not find weather for "${location}"`;
+            weatherIcon.textContent = '❌';
+            temperature.textContent = '--';
+            conditionText.textContent = 'LOCATION INVALID';
+            // Clear details
+            windSpeed.textContent = '--';
+            humidity.textContent = '--';
+            feelsLike.textContent = '--';
+            uvIndex.textContent = '--';
+            weatherDisplay.classList.remove('hidden');
+        }
+
+        /**
+         * Displays a temporary message in the message area.
+         * @param {string} msg - The message to display.
+         * @param {string} classes - Tailwind classes for styling (e.g., 'text-red-400').
+         */
+        function displayMessage(msg, classes = 'text-gray-800') {
+            messageArea.className = `text-center text-sm mb-4 h-6 ${classes}`;
+            messageArea.textContent = msg;
+        }
+
+        // --- Event Listeners ---
+
+        searchButton.addEventListener('click', () => {
+            fetchWeather(locationInput.value.trim());
+        });
+
+        locationInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                fetchWeather(locationInput.value.trim());
+            }
+        });
+
+        // Initial state: apply stored theme and display instructions.
+        window.onload = () => {
+            // Apply theme from storage
+            applyBaseTheme(currentTheme);
+            
+            // Ensure the input field is blank
+            locationInput.value = '';
+            
+            // Set placeholder values according to the applied theme's colors
+            updatePlaceholderText(themeConfigs[currentTheme].textColor);
+        };
+
+    </script>
+</body>
+</html>
